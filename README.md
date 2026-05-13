@@ -2,7 +2,7 @@
 知乎 mate，best mate！
 
 ## 项目说明
-**<color=red>项目开始run之前，需要</color>**
+**<font color=red>项目开始run之前，需要</color>**
 * rename config/API_KEY_demo.json to config/API_KEY.json
 * 在config/API_KEY.json中配置相关数据
 
