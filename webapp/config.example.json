@@ -1,0 +1,25 @@
+{
+  "deepseek_api_key": "",
+  "deepseek_base_url": "https://api.deepseek.com/v1",
+  "deepseek_model": "deepseek-chat",
+
+  "zhihu_app_key": "",
+
+  "zhihu_oauth_app_id": "",
+  "zhihu_oauth_app_key": "",
+  "zhihu_oauth_redirect_uri": "",
+
+  "flask_secret_key": "",
+
+  "use_mock_when_missing_key": true,
+
+  "_comments": {
+    "deepseek_api_key": "DeepSeek 控制台获取的 API key，留空则 Zmate 走规则化 mock 回复。",
+    "zhihu_app_key": "知乎用户 token（可选），用于调用社区开放接口；不填将仅展示 mock feed。app_secret 自动从 ../config/API_KEY.json 读取。",
+    "zhihu_oauth_app_id": "知乎 OAuth 应用的 app_id；可以直接写在 ../config/API_KEY.json 里的 APP_ID 字段，会被自动加载。",
+    "zhihu_oauth_app_key": "知乎 OAuth 应用的 app_key；可以直接写在 ../config/API_KEY.json 里的 APP_KEY 字段，会被自动加载。",
+    "zhihu_oauth_redirect_uri": "留空时会按本次请求的 Host 自动拼成 <scheme>://<host>/auth/zhihu/callback，本地 (127.0.0.1:5050) 与 bore.pub 隧道公网入口都能直接命中；只有挂在反向代理后面、且 Host 头不可信时才需要写死成固定 URL。",
+    "flask_secret_key": "Flask session 用的签名密钥，留空时会自动生成（重启进程后已登录用户会被踢下线）。生产环境请固定一个长随机串。",
+    "use_mock_when_missing_key": "缺失 key 时是否回退到 mock 数据（默认 true，便于本地直接体验）。"
+  }
+}

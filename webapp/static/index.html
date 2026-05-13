@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Zmate · 知乎首页</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Zmate 是一个知乎首页的演示项目，集成 AI 助手 Zmate，可推荐热点并陪你讨论。" />
+    <link rel="icon" type="image/svg+xml" href="./img/favicon.svg" />
+    <link rel="stylesheet" href="./css/common.css" />
+    <link rel="stylesheet" href="./css/home.css" />
+    <link rel="stylesheet" href="./css/zmate.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="app-header__inner">
+        <div class="app-logo">
+          <span class="app-logo__badge">Z</span>
+          Zmate
+        </div>
+        <nav class="app-nav">
+          <a class="app-nav__link is-active" href="./">首页</a>
+          <a class="app-nav__link" href="javascript:void(0)" data-noop>会员</a>
+          <a class="app-nav__link" href="javascript:void(0)" data-noop>知学堂</a>
+          <a class="app-nav__link" href="javascript:void(0)" data-noop>等你来答</a>
+        </nav>
+        <form class="app-search" data-search-form>
+          <input
+            class="app-search__input"
+            type="search"
+            placeholder="搜索内容、问题、用户"
+            data-search-input
+          />
+          <button class="app-search__btn" type="submit">搜索</button>
+        </form>
+        <div class="app-header__right">
+          <button class="app-icon-btn" title="通知">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 22a2 2 0 002-2h-4a2 2 0 002 2zm6-6V11a6 6 0 10-12 0v5l-2 2v1h16v-1l-2-2z" />
+            </svg>
+          </button>
+          <button class="app-icon-btn" title="消息">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M20 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
+            </svg>
+          </button>
+          <button class="app-cta">提问</button>
+          <span class="app-avatar">我</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <aside class="app-shell__left" data-left-rail>
+        <div class="left-rail">
+          <div class="left-rail__title">发现</div>
+          <ul class="left-rail__list">
+            <li class="left-rail__item is-active">
+              <span class="skeleton skeleton-line w-60" style="height:14px;"></span>
+            </li>
+          </ul>
+        </div>
+      </aside>
+
+      <section class="app-shell__main">
+        <div class="tabs" data-tabs>
+          <div class="tabs__item is-active">推荐</div>
+          <div class="tabs__item">关注</div>
+          <div class="tabs__item">热榜</div>
+          <button class="tabs__refresh" data-refresh-feed>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M17.65 6.35A7.95 7.95 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L13 11h7V4l-2.35 2.35z" />
+            </svg>
+            换一批
+          </button>
+        </div>
+
+        <div class="refresh-strip" data-refresh-strip></div>
+
+        <div class="feed" data-feed>
+          <div class="skeleton-card">
+            <div class="skeleton skeleton-line w-30"></div>
+            <div class="skeleton skeleton-line w-90"></div>
+            <div class="skeleton skeleton-line w-90"></div>
+            <div class="skeleton skeleton-line w-60"></div>
+            <div class="skeleton skeleton-block"></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="app-shell__right" data-right-rail>
+        <div class="card hot-card">
+          <div class="hot-card__head">
+            <span class="badge">HOT</span>
+            <h3>知乎热榜</h3>
+          </div>
+          <div style="padding: 0 18px 18px">
+            <div class="skeleton skeleton-line w-90" style="margin-bottom:10px;"></div>
+            <div class="skeleton skeleton-line w-60" style="margin-bottom:10px;"></div>
+            <div class="skeleton skeleton-line w-90" style="margin-bottom:10px;"></div>
+            <div class="skeleton skeleton-line w-60"></div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <script src="./config.js"></script>
+    <script src="./js/api.js"></script>
+    <script src="./js/auth.js"></script>
+    <script src="./js/zmate.js"></script>
+    <script src="./js/home.js"></script>
+  </body>
+</html>

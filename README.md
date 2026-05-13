@@ -2,13 +2,10 @@
 知乎 mate，best mate！
 
 ## 项目说明
+**<color=red>项目开始run之前，需要</color>**
+* rename config/API_KEY_demo.json to config/API_KEY.json
+* 在config/API_KEY.json中配置相关数据
 
-1. 实现一个 html 页面，页面内容和知乎主页一致（可参考 `refer_page/首页 - 知乎.html`），各个模块也都填充好内容。刷新的时候要有更新的效果。
-2. 在 `index.html` 页面加一个小助手 Zmate，点击小助手，他可以给我推荐今天的新闻热点，并且可以跟我讨论新闻热点。
-3. 用户点击某个文档进入详情页，Zmate 也会出现。用户可以跟 Zmate 讨论文档的信息。
-4. 这是一个新的项目，已有的代码和文档不能修改，新增的代码和文档需要规范，可以新建文件夹和文件。
-
----
 
 ## 本地启动
 
@@ -82,7 +79,7 @@ git push
 ## 文件结构
 
 ```
-config/                  # 后端配置（API_KEY.json 已 git 忽略）
+config/                  # 后端配置
 document/                # 接口文档
 webapp/
   ├─ run.sh              # 启动后端

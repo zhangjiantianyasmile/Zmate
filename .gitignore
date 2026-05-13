@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+
+config/API_KEY.json
+
+# 本地接口缓存（运行时生成，不需要进 git）
+webapp/cache/

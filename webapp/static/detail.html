@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Zmate · 文档详情</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="./img/favicon.svg" />
+    <link rel="stylesheet" href="./css/common.css" />
+    <link rel="stylesheet" href="./css/detail.css" />
+    <link rel="stylesheet" href="./css/zmate.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="app-header__inner">
+        <a class="app-logo" href="./">
+          <span class="app-logo__badge">Z</span>
+          Zmate
+        </a>
+        <nav class="app-nav">
+          <a class="app-nav__link" href="./">首页</a>
+          <a class="app-nav__link is-active" href="javascript:void(0)">详情</a>
+        </nav>
+        <form class="app-search" data-search-form>
+          <input
+            class="app-search__input"
+            type="search"
+            placeholder="在 Zmate 内继续探索"
+            data-search-input
+          />
+          <button class="app-search__btn" type="submit">搜索</button>
+        </form>
+        <div class="app-header__right">
+          <a class="app-cta app-cta--ghost" href="./">回到首页</a>
+          <span class="app-avatar">我</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="detail-shell">
+      <section data-detail-main>
+        <div class="detail-loading">正在为你加载这篇内容…</div>
+      </section>
+      <aside class="detail-side" data-detail-side></aside>
+      <section class="detail-comments" data-comments style="grid-column: 1 / -1;"></section>
+    </main>
+
+    <script src="./config.js"></script>
+    <script src="./js/api.js"></script>
+    <script src="./js/auth.js"></script>
+    <script src="./js/zmate.js"></script>
+    <script src="./js/detail.js"></script>
+  </body>
+</html>
