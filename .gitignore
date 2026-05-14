@@ -7,3 +7,6 @@ config/API_KEY.json
 
 # 本地接口缓存（运行时生成，不需要进 git）
 webapp/cache/
+
+# 大模型调用日志（运行时生成，可能含较敏感的 prompt 与响应）
+webapp/logs/

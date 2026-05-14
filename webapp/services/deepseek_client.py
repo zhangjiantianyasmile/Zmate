@@ -9,17 +9,21 @@ from typing import Dict, Generator, Iterable, List, Optional
 
 import requests
 
+from . import roles
+from .llm_logger import LLMCallLogger
+
 
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = (
-    "你是 Zmate（知乎 Mate），一个温暖、犀利、善于发掘内容洞察的 AI 知识伙伴。"
-    "回答风格要：1) 中文为主，自然亲切；2) 先抛观点，再给依据；"
-    "3) 善用结构化要点和短段落；4) 涉及热点时主动列出对应的事件/数据/利益相关方；"
-    "5) 当用户在阅读某篇文章/回答时，结合用户提供的文档摘要内容回答；"
-    "6) 对不确定的事实保持克制，主动告知用户去做交叉验证。"
-)
+# 「默认 Zmate 人设」统一收口到 roles 模块，本变量作为向后兼容的别名保留，
+# 避免外部代码 / 历史调用一改就崩。
+SYSTEM_PROMPT = roles.get_prompt(roles.DEFAULT)
+
+
+# 单次 HTTP 请求超时（秒）。集中暴露成模块级常量，方便 server.py 在
+# config 里未配置时回落到这里，避免「默认值」散落在多个文件。
+DEFAULT_TIMEOUT = 60
 
 
 class DeepSeekClient:
@@ -28,7 +32,7 @@ class DeepSeekClient:
         api_key: str,
         base_url: str = "https://api.deepseek.com/v1",
         model: str = "deepseek-chat",
-        timeout: int = 60,
+        timeout: int = DEFAULT_TIMEOUT,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -56,17 +60,47 @@ class DeepSeekClient:
             "stream": False,
             "temperature": temperature,
         }
-        resp = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-        if resp.status_code >= 400:
-            raise RuntimeError(
-                f"deepseek http {resp.status_code}: {resp.text[:200]}"
-            )
-        body = resp.json()
-        choices = body.get("choices") or []
-        if not choices:
-            return ""
-        msg = choices[0].get("message") or {}
-        return msg.get("content") or ""
+        call_log = LLMCallLogger(
+            provider="deepseek",
+            model=self.model,
+            request_url=url,
+            request_headers=headers,
+            request_payload=payload,
+            stream=False,
+        )
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+            # 防御性锁定 utf-8：DeepSeek 当前响应头带 charset=utf-8 不会踩坑，
+            # 但 OpenAI 兼容代理 / 反代后面接其它实现时不一定带；统一锁死避免
+            # `iter_lines(decode_unicode=True)` fall back 到 Latin-1 出现中文乱码。
+            resp.encoding = "utf-8"
+            call_log.log_response_meta(resp.status_code, resp.headers)
+            if resp.status_code >= 400:
+                call_log.log_response_body(resp.text)
+                call_log.log_error(f"http {resp.status_code}")
+                raise RuntimeError(
+                    f"deepseek http {resp.status_code}: {resp.text[:200]}"
+                )
+            try:
+                body = resp.json()
+            except ValueError:
+                call_log.log_response_body(resp.text)
+                call_log.log_error("non-json response body")
+                return ""
+            call_log.log_response_body(body)
+            choices = body.get("choices") or []
+            if not choices:
+                return ""
+            msg = choices[0].get("message") or {}
+            content = msg.get("content") or ""
+            if content:
+                call_log.log_stream_delta(content)
+            return content
+        except Exception as exc:
+            call_log.log_error(f"{type(exc).__name__}: {exc}")
+            raise
+        finally:
+            call_log.close()
 
     def chat_stream(
         self,
@@ -85,32 +119,59 @@ class DeepSeekClient:
             "stream": True,
             "temperature": temperature,
         }
-        with requests.post(
-            url, headers=headers, json=payload, stream=True, timeout=self.timeout
-        ) as resp:
-            if resp.status_code >= 400:
-                err = resp.text[:500]
-                logger.warning("DeepSeek error %s: %s", resp.status_code, err)
-                yield f"[Zmate 调用模型出错 {resp.status_code}：{err}]"
-                return
-            for raw_line in resp.iter_lines(decode_unicode=True):
-                if not raw_line:
-                    continue
-                if raw_line.startswith("data: "):
-                    raw_line = raw_line[len("data: "):]
-                if raw_line.strip() == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(raw_line)
-                except json.JSONDecodeError:
-                    continue
-                choices = chunk.get("choices") or []
-                if not choices:
-                    continue
-                delta = choices[0].get("delta") or {}
-                content = delta.get("content")
-                if content:
-                    yield content
+        call_log = LLMCallLogger(
+            provider="deepseek",
+            model=self.model,
+            request_url=url,
+            request_headers=headers,
+            request_payload=payload,
+            stream=True,
+        )
+        try:
+            with requests.post(
+                url, headers=headers, json=payload, stream=True, timeout=self.timeout
+            ) as resp:
+                # 同 chat_once：覆盖 requests 对没 charset 的响应做 Latin-1 兜底
+                # 的猜测，确保 iter_lines(decode_unicode=True) 按 utf-8 解码。
+                resp.encoding = "utf-8"
+                call_log.log_response_meta(resp.status_code, resp.headers)
+                if resp.status_code >= 400:
+                    err = resp.text[:500]
+                    logger.warning("DeepSeek error %s: %s", resp.status_code, err)
+                    call_log.log_response_body(err)
+                    call_log.log_error(f"http {resp.status_code}")
+                    fallback = f"[Zmate 调用模型出错 {resp.status_code}：{err}]"
+                    call_log.log_stream_delta(fallback)
+                    yield fallback
+                    return
+                for raw_line in resp.iter_lines(decode_unicode=True):
+                    if not raw_line:
+                        continue
+                    call_log.log_stream_raw_line(raw_line)
+                    if raw_line.startswith("data: "):
+                        raw_line = raw_line[len("data: "):]
+                    if raw_line.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw_line)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    content = delta.get("content")
+                    if content:
+                        call_log.log_stream_delta(content)
+                        yield content
+        except requests.RequestException as exc:
+            logger.warning("deepseek request failed: %s", exc)
+            call_log.log_error(f"RequestException: {exc}")
+            fallback = f"\n[Zmate 调用模型失败：{exc}]"
+            call_log.log_stream_delta(fallback)
+            yield fallback
+        finally:
+            call_log.close()
 
 
 # ---------------- Mock fallback ---------------- #

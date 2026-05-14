@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import deepseek_client, hot_list
+from . import deepseek_client, hot_list, roles
 from .config_loader import load_config
 
 
@@ -42,12 +42,9 @@ _LOCK = threading.Lock()
 
 # ---------------- Prompt 范式（后续接入真实 DeepSeek 时直接生效） ---------------- #
 
-PICK_SYSTEM_PROMPT = (
-    "你是 Zmate（知乎 Mate），一名擅长信息筛选的中文 AI 助理。"
-    "用户希望你从今天的知乎热榜 Top 20 里，挑出最「值得关注」的 5 条话题。"
-    "你的判断标准是：是否具有公共讨论价值、是否对普通人有信息增量、"
-    "是否能反映行业 / 政策 / 社会的真实趋势。"
-)
+# 「挑 5 条」属于热点提取师的本职工作，复用 roles 模块定义；具体「恰好 5 条 /
+# 输出 JSON」等任务约束放在下面的 user prompt 里，避免两处重复维护。
+PICK_SYSTEM_PROMPT = roles.get_prompt(roles.TOPIC_PICK)
 
 PICK_USER_PROMPT_TEMPLATE = (
     "下面是今天知乎热榜的候选列表（已按热度从高到低排序）：\n\n"

@@ -9,7 +9,7 @@
   ];
 
   const SUGGESTIONS_DOC = [
-    "帮我提炼 5 分钟口头摘要",
+    "帮我提炼摘要",
     "这篇里最有争议的观点是什么？",
     "里面有哪些可以验证的事实和数据？",
     "对普通从业者来说有哪些可执行建议？",
@@ -83,7 +83,7 @@
       provider: "zhida",
       model: "zhida-thinking-1p5",
       label: "知乎直答 · 深度思考",
-      short: "直答·思考",
+      short: "直答·深度",
       ready: true,
       default: true,
     },
@@ -98,7 +98,7 @@
     {
       provider: "deepseek",
       model: "deepseek-chat",
-      label: "DeepSeek Chat（未配置）",
+      label: "DeepSeek",
       short: "DeepSeek",
       ready: false,
       default: false,
@@ -450,6 +450,11 @@
               title: this.document.title,
               author: (this.document.author && this.document.author.name) || "",
               excerpt: this.document.excerpt || "",
+              // 直答 / moonshot-v1-8k 在后端会切到「全文」分支，没传 paragraphs
+              // 就退回老逻辑只用 excerpt，避免老页面调用断开。
+              paragraphs: Array.isArray(this.document.paragraphs)
+                ? this.document.paragraphs
+                : [],
             }
           : null,
         context: silent ? "请基于刚刚提供的 TOP5 热点直接给出今日观察。" : "",

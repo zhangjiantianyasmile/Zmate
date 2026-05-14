@@ -3,6 +3,16 @@
   "deepseek_base_url": "https://api.deepseek.com/v1",
   "deepseek_model": "deepseek-chat",
 
+  "kimi_api_key": "",
+  "kimi_base_url": "https://api.moonshot.cn/v1",
+  "kimi_model": "kimi-k2-thinking-turbo",
+
+  "model_timeouts": {
+    "deepseek": 60,
+    "zhida": 120,
+    "kimi": 90
+  },
+
   "zhihu_app_key": "",
 
   "zhihu_oauth_app_id": "",
@@ -15,6 +25,10 @@
 
   "_comments": {
     "deepseek_api_key": "DeepSeek 控制台获取的 API key，留空则 Zmate 走规则化 mock 回复。",
+    "kimi_api_key": "Moonshot 开放平台（platform.moonshot.ai / platform.moonshot.cn）申请的 API key；与 web 端 kimi.com 账号不互通，需单独注册并充值。留空时会从 ../config/API_KEY.json 的 kimi_api_key / KIMI_API_KEY / MOONSHOT_API_KEY 兜底读取。三处都没有则 Kimi 通道走兜底回复。",
+    "kimi_base_url": "默认 https://api.moonshot.cn/v1（国内站）。⚠️ 关键：必须与 kimi_api_key 申请的开放平台一致——国内站 platform.moonshot.cn 申请的 key 只能配 api.moonshot.cn；国际站 platform.moonshot.ai 申请的 key 只能配 api.moonshot.ai。两边账号体系完全独立、key 互不通用，配错会直接 401 Invalid Authentication。",
+    "kimi_model": "默认模型 id：kimi-k2-thinking-turbo（K2 思考 Turbo，256k 上下文）。K2 系列将于 2026-05-25 下线，届时迁到 kimi-k2.6-thinking。",
+    "model_timeouts": "三个对话模型单次 HTTP 请求超时（秒），统一管理：deepseek/zhida 默认 60s，kimi 思考模型首 token 较慢默认 90s。任意键缺失或非正整数都会回落到对应 client.DEFAULT_TIMEOUT。也可通过环境变量 DEEPSEEK_TIMEOUT / ZHIDA_TIMEOUT / KIMI_TIMEOUT 覆盖。",
     "zhihu_app_key": "知乎用户 token（可选），用于调用社区开放接口；不填将仅展示 mock feed。app_secret 自动从 ../config/API_KEY.json 读取。",
     "zhihu_oauth_app_id": "知乎 OAuth 应用的 app_id；可以直接写在 ../config/API_KEY.json 里的 APP_ID 字段，会被自动加载。",
     "zhihu_oauth_app_key": "知乎 OAuth 应用的 app_key；可以直接写在 ../config/API_KEY.json 里的 APP_KEY 字段，会被自动加载。",

@@ -25,6 +25,9 @@
         title: doc.title,
         author: doc.author,
         excerpt: (doc.paragraphs || [])[0] || "",
+        // 完整正文随 setDocument 一起带进来；后端在挑到直答 / moonshot-v1-8k
+        // 时会用整段正文替换 excerpt，其它模型仍按摘要拼 system prompt。
+        paragraphs: doc.paragraphs || [],
       });
 
       const bubble = document.querySelector(".zmate-launcher__bubble");

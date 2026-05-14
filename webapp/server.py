@@ -29,7 +29,9 @@ from services import (
     deepseek_client,
     hot_list,
     hot_picks,
+    kimi_client,
     mock_data,
+    roles,
     search as search_service,
     zhida_client,
     zhihu_oauth,
@@ -40,6 +42,7 @@ from services.config_loader import load_config
 # 可选的对话模型 provider；前端会用它做选择，后端据此路由。
 PROVIDER_DEEPSEEK = "deepseek"
 PROVIDER_ZHIDA = "zhida"
+PROVIDER_KIMI = "kimi"
 DEFAULT_PROVIDER = PROVIDER_ZHIDA
 
 
@@ -64,12 +67,27 @@ app.config.update(
 CORS(app, supports_credentials=True)
 
 
+def _resolve_timeout(cfg: Dict[str, Any], provider: str, fallback: int) -> int:
+    """从 `model_timeouts.<provider>` 取出有效的正整数 timeout；缺失则用 fallback。
+
+    `config_loader.load_config()` 已经做了类型清洗，这里再做一次防御性兜底，
+    避免别处直接拼配置时塞进非法值导致 requests.timeout 报 TypeError。
+    """
+    raw = (cfg.get("model_timeouts") or {}).get(provider)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return fallback
+    return n if n > 0 else fallback
+
+
 def _build_deepseek() -> deepseek_client.DeepSeekClient:
     cfg = load_config()
     return deepseek_client.DeepSeekClient(
         api_key=cfg.get("deepseek_api_key", "") or "",
         base_url=cfg.get("deepseek_base_url") or "https://api.deepseek.com/v1",
         model=cfg.get("deepseek_model") or "deepseek-chat",
+        timeout=_resolve_timeout(cfg, "deepseek", deepseek_client.DEFAULT_TIMEOUT),
     )
 
 
@@ -77,6 +95,17 @@ def _build_zhida() -> zhida_client.ZhidaClient:
     cfg = load_config()
     return zhida_client.ZhidaClient(
         access_secret=cfg.get("zhihu_app_secret", "") or "",
+        timeout=_resolve_timeout(cfg, "zhida", zhida_client.DEFAULT_TIMEOUT),
+    )
+
+
+def _build_kimi() -> kimi_client.KimiClient:
+    cfg = load_config()
+    return kimi_client.KimiClient(
+        api_key=cfg.get("kimi_api_key", "") or "",
+        base_url=cfg.get("kimi_base_url") or kimi_client.DEFAULT_BASE_URL,
+        model=cfg.get("kimi_model") or kimi_client.DEFAULT_MODEL,
+        timeout=_resolve_timeout(cfg, "kimi", kimi_client.DEFAULT_TIMEOUT),
     )
 
 
@@ -85,12 +114,13 @@ def _model_catalog() -> List[Dict[str, Any]]:
     cfg = load_config()
     deepseek_ready = bool(cfg.get("deepseek_api_key"))
     zhida_ready = bool(cfg.get("zhihu_app_secret"))
+    kimi_ready = bool(cfg.get("kimi_api_key"))
     return [
         {
             "provider": PROVIDER_ZHIDA,
             "model": "zhida-thinking-1p5",
             "label": "知乎直答 · 深度思考",
-            "short": "直答·思考",
+            "short": "直答·深度",
             "description": "走知乎开放平台的 zhida-thinking-1p5 模型，适合需要推理过程的复杂提问。",
             "ready": zhida_ready,
             "default": True,
@@ -104,6 +134,48 @@ def _model_catalog() -> List[Dict[str, Any]]:
             "ready": zhida_ready,
             "default": False,
         },
+        # {
+        #     "provider": PROVIDER_KIMI,
+        #     "model": "kimi-k2-thinking-turbo",
+        #     "label": "Kimi K2 · 思考 Turbo",
+        #     "short": "Kimi·思考T",
+        #     "description": (
+        #         "Moonshot 官方 kimi-k2-thinking-turbo，256k 上下文 + 强推理；"
+        #         "需要付费层（free 账号会 404 Permission denied，去 platform.moonshot.cn 充值 ¥10+ 后可用）。"
+        #     ),
+        #     "ready": kimi_ready,
+        #     "default": False,
+        # },
+        # {
+        #     "provider": PROVIDER_KIMI,
+        #     "model": "kimi-k2-thinking",
+        #     "label": "Kimi K2 · 思考",
+        #     "short": "Kimi·思考",
+        #     "description": "Moonshot 官方 kimi-k2-thinking 标准档，强推理优先；同样需要付费层。",
+        #     "ready": kimi_ready,
+        #     "default": False,
+        # },
+        {
+            "provider": PROVIDER_KIMI,
+            "model": "moonshot-v1-8k",
+            "label": "Moonshot v1 · 8k",
+            "short": "Kimi·v1-8k",
+            "description": (
+                "Moonshot 基础对话模型，8k 上下文；free 账号开箱可用，"
+                "适合先把通道跑通再考虑充值切到 K2 思考。"
+            ),
+            "ready": kimi_ready,
+            "default": False,
+        },
+        # {
+        #     "provider": PROVIDER_KIMI,
+        #     "model": "moonshot-v1-128k",
+        #     "label": "Moonshot v1 · 128k（长上下文）",
+        #     "short": "Kimi·v1-128k",
+        #     "description": "Moonshot 基础对话 128k 上下文版本；适合长文档场景。需账号开通该档位。",
+        #     "ready": kimi_ready,
+        #     "default": False,
+        # },
         {
             "provider": PROVIDER_DEEPSEEK,
             "model": "deepseek-chat",
@@ -425,17 +497,51 @@ def api_zmate_models() -> Response:
     )
 
 
+@app.route("/api/zmate/kimi/models")
+def api_zmate_kimi_models() -> Response:
+    """排障入口：列出当前 kimi_api_key 实际能调的模型。
+
+    只在你主动访问这个 URL 时才会向 Moonshot 发一次 GET /v1/models。
+    用法：浏览器打开 http://<webapp>/api/zmate/kimi/models 即可看到
+    当前账号在 base_url 这一站下被授权的模型列表，便于排查 404
+    "Not found ... or Permission denied" 之类的权限问题。
+    """
+    client = _build_kimi()
+    if not client.is_ready:
+        return jsonify({"error": "kimi_api_key 未配置"}), 503
+    try:
+        body = client.list_models()
+    except Exception as exc:
+        logger.warning("kimi list_models failed: %s", exc)
+        return jsonify(
+            {
+                "error": "list_models_failed",
+                "message": str(exc),
+                "base_url": client.base_url,
+            }
+        ), 502
+    return jsonify(
+        {
+            "base_url": client.base_url,
+            "configured_model": client.model,
+            "upstream": body,
+        }
+    )
+
+
 def _resolve_provider(req_provider: str, req_model: str) -> Dict[str, str]:
     """把前端传入的 provider/model 归一化到我们支持的范围内。"""
     provider = (req_provider or "").strip().lower()
     model = (req_model or "").strip()
 
-    if provider not in (PROVIDER_DEEPSEEK, PROVIDER_ZHIDA):
+    if provider not in (PROVIDER_DEEPSEEK, PROVIDER_ZHIDA, PROVIDER_KIMI):
         # 兼容前端只传 model 的情况：根据前缀猜测 provider。
         if model.startswith("zhida"):
             provider = PROVIDER_ZHIDA
         elif model.startswith("deepseek"):
             provider = PROVIDER_DEEPSEEK
+        elif model.startswith("kimi") or model.startswith("moonshot"):
+            provider = PROVIDER_KIMI
         else:
             provider = DEFAULT_PROVIDER
 
@@ -443,7 +549,107 @@ def _resolve_provider(req_provider: str, req_model: str) -> Dict[str, str]:
         model = zhida_client.DEFAULT_MODEL
     if provider == PROVIDER_DEEPSEEK and not model:
         model = "deepseek-chat"
+    if provider == PROVIDER_KIMI and model not in kimi_client.ALLOWED_MODELS:
+        model = kimi_client.DEFAULT_MODEL
     return {"provider": provider, "model": model}
+
+
+# 不同模型在「文档摘要」场景下的输入粒度。直答系列（zhida-*）和
+# moonshot-v1-8k 已经实测拿到只给 excerpt 时会回「信息不足」，所以这里把它们
+# 切到「全文」分支；其他模型（kimi 思考型 / deepseek-chat）保持只给 excerpt，
+# 既照顾到上下文预算，也避免长文把 system prompt 顶出窗口。
+_FULL_BODY_MODELS = {
+    (PROVIDER_KIMI, "moonshot-v1-8k"),
+}
+
+# 单次注入的「正文」最大字符数。zhida 系列默认上下文较宽松（深度思考还会
+# 自带一层 RAG），给得多一点；moonshot-v1-8k 总预算只有 ~8k token，
+# 留出 system prompt + 历史 + 回复的空间，截到 4000 字比较稳。
+_FULL_BODY_MAX_CHARS = {
+    PROVIDER_ZHIDA: 6000,
+    PROVIDER_KIMI: 4000,
+}
+
+
+def _doc_payload_kind(provider: str, model: str) -> str:
+    """判断当前 provider/model 是「吃全文」还是「吃摘要」。
+
+    返回值：`"full"` / `"excerpt"`。所有 zhida 子模型一律走全文（前一版只给
+    excerpt 时上游会回 "信息不足，无法给出可靠摘要"）；kimi 仅 moonshot-v1-8k
+    走全文；其他模型继续吃摘要。
+    """
+    if provider == PROVIDER_ZHIDA:
+        return "full"
+    if (provider, model) in _FULL_BODY_MODELS:
+        return "full"
+    return "excerpt"
+
+
+def _extract_full_content(document: Dict[str, Any]) -> str:
+    """从前端传过来的 document 里抽出可用的「完整正文」。
+
+    支持两种字段：
+      - `paragraphs: List[str]`：detail.js 直接把 `doc.paragraphs` 带过来的
+        情况，按顺序用空行拼接；
+      - `full_content: str`：调用方已经自行渲染好长文时直接塞一段；
+    都拿不到时返回空串，外层会回退到 `excerpt`。
+    """
+    paragraphs = document.get("paragraphs")
+    if isinstance(paragraphs, list):
+        joined = "\n\n".join(
+            p.strip() for p in paragraphs if isinstance(p, str) and p.strip()
+        )
+        if joined:
+            return joined
+    full = document.get("full_content")
+    if isinstance(full, str) and full.strip():
+        return full.strip()
+    return ""
+
+
+def _build_doc_summary(
+    document: Dict[str, Any],
+    provider: str,
+    model: str,
+) -> str:
+    """根据 provider/model 决定塞 excerpt 还是 full content，再渲染成 system 段落。
+
+    没有任何可用正文时返回空串（让上层别拼这一段，避免给模型留 "内容摘要：" 后空白）。
+    """
+    if not document:
+        return ""
+
+    kind = _doc_payload_kind(provider, model)
+    if kind == "full":
+        full_text = _extract_full_content(document)
+        if full_text:
+            cap = _FULL_BODY_MAX_CHARS.get(provider, 4000)
+            if len(full_text) > cap:
+                full_text = full_text[:cap] + "\n…（正文超长已截断，仅保留前面部分）"
+            body, body_label = full_text, "正文"
+        else:
+            # 旧版前端没传 paragraphs，又是 zhida / moonshot-v1-8k 路径——
+            # 不能凭空补，也不能假装这是「正文」，老老实实降级回 excerpt。
+            body = document.get("excerpt") or ""
+            body_label = "内容摘要"
+    else:
+        body = document.get("excerpt") or ""
+        body_label = "内容摘要"
+
+    if not body:
+        # 标题/作者还是值得一塞，至少能让模型知道现在在聊哪一篇。
+        return (
+            f"\n\n[当前用户正在阅读的文档信息]\n"
+            f"标题：{document.get('title','')}\n"
+            f"作者：{document.get('author','')}\n"
+        )
+
+    return (
+        f"\n\n[当前用户正在阅读的文档信息]\n"
+        f"标题：{document.get('title','')}\n"
+        f"作者：{document.get('author','')}\n"
+        f"{body_label}：{body}\n"
+    )
 
 
 @app.route("/api/zmate/chat", methods=["POST"])
@@ -463,15 +669,26 @@ def api_zmate_chat() -> Response:
         if role in ("user", "assistant") and content:
             cleaned.append({"role": role, "content": content})
 
-    system_prompt = deepseek_client.SYSTEM_PROMPT
-    if document:
-        doc_summary = (
-            f"\n\n[当前用户正在阅读的文档信息]\n"
-            f"标题：{document.get('title','')}\n"
-            f"作者：{document.get('author','')}\n"
-            f"内容摘要：{document.get('excerpt','')}\n"
+    # 选 scene（即让模型扮演哪个『角色』）：
+    #   1) 前端显式带 scene → 严格按枚举校验，非法值回落 default；
+    #   2) 没带就根据用户最后一条消息 + 是否在文档场景下自动识别。
+    # 不管哪条路径，最终都只会得到 default / summarizer / topic_pick / debater 之一。
+    explicit_scene = (body.get("scene") or "").strip().lower()
+    last_user_msg = next((m for m in reversed(cleaned) if m["role"] == "user"), None)
+    last_user_text = (last_user_msg or {}).get("content", "")
+    if explicit_scene in roles.ALLOWED:
+        scene = explicit_scene
+    else:
+        scene = roles.auto_pick_scene(
+            user_text=last_user_text,
+            has_document=bool(document),
         )
-        system_prompt += doc_summary
+
+    system_prompt = roles.get_prompt(scene)
+    if document:
+        # 直答 / moonshot-v1-8k 走「全文」，其它模型继续走 excerpt——
+        # 由 `_build_doc_summary` 内部按 provider/model 选择并截断。
+        system_prompt += _build_doc_summary(document, provider, model)
     if extra_context:
         system_prompt += f"\n\n[额外上下文]\n{extra_context}\n"
 
@@ -481,14 +698,22 @@ def api_zmate_chat() -> Response:
         if provider == PROVIDER_ZHIDA:
             zclient = _build_zhida()
             if zclient.is_ready:
-                logger.info("zmate chat -> zhida (%s)", model)
+                logger.info("zmate chat -> zhida (%s) scene=%s", model, scene)
                 return zclient.chat_stream(full_messages, model=model), "zhida"
             logger.info("zmate chat -> zhida fallback to mock (no app_secret)")
             return deepseek_client.mock_chat_stream(cleaned, document=document), "mock"
 
+        if provider == PROVIDER_KIMI:
+            kclient = _build_kimi()
+            if kclient.is_ready:
+                logger.info("zmate chat -> kimi (%s) scene=%s", model, scene)
+                return kclient.chat_stream(full_messages, model=model), "kimi"
+            logger.info("zmate chat -> kimi fallback to mock (no api key)")
+            return deepseek_client.mock_chat_stream(cleaned, document=document), "mock"
+
         dclient = _build_deepseek()
         if dclient.is_ready:
-            logger.info("zmate chat -> deepseek (%s)", dclient.model)
+            logger.info("zmate chat -> deepseek (%s) scene=%s", dclient.model, scene)
             return dclient.chat_stream(full_messages), "deepseek"
         logger.info("zmate chat -> deepseek fallback to mock (no api key)")
         return deepseek_client.mock_chat_stream(cleaned, document=document), "mock"
@@ -497,7 +722,14 @@ def api_zmate_chat() -> Response:
         try:
             generator, used = _make_generator()
             yield "data: " + json.dumps(
-                {"meta": {"provider": provider, "model": model, "served_by": used}},
+                {
+                    "meta": {
+                        "provider": provider,
+                        "model": model,
+                        "served_by": used,
+                        "scene": scene,
+                    }
+                },
                 ensure_ascii=False,
             ) + "\n\n"
             for chunk in generator:
