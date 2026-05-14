@@ -5,7 +5,7 @@
 **内容**里描述，对外用一个 scene 标识来切换：
 
     scene=default     → 默认 Zmate 人设（温暖犀利的内容洞察伙伴）
-    scene=summarizer  → 内容精炼师，把长文压缩成 5 分钟口头摘要
+    scene=summarizer  → 内容精炼师，把长文压缩成 1 分钟口头摘要
     scene=topic_pick  → 热点提取师，从候选话题里挑出最值得关注的几条
     scene=debater     → 辩证分析师，针对争议话题列正反两派依据
 

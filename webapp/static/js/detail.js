@@ -12,7 +12,9 @@
 
     bindSearchForm();
 
-    let zmate = new window.Zmate({});
+    // 详情页一打开就锁定「文档场景」：Zmate 顶栏的「今日热点」入口会立即
+    // 隐藏，避免文档接口异步返回前按钮短暂闪现。
+    let zmate = new window.Zmate({ inDocumentPage: true });
 
     try {
       const doc = await getJSON(`/api/document/${encodeURIComponent(id)}`);

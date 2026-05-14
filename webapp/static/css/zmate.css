@@ -168,6 +168,14 @@
   justify-content: center;
 }
 
+/* HTML 原生 `hidden` 属性的 UA 默认样式是 `display: none`，但作者样式
+   表里给 `.zmate-panel__action` 写了 `display: inline-flex` 优先级更高，
+   会盖掉 `hidden` 的效果。这里显式补一条 `[hidden]` 规则，让 JS 通过
+   `el.hidden = true` 就能真正隐藏按钮（如详情页屏蔽「今日热点」入口）。 */
+.zmate-panel__action[hidden] {
+  display: none;
+}
+
 .zmate-panel__action:hover {
   background: rgba(255, 255, 255, 0.28);
 }

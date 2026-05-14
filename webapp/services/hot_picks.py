@@ -1,17 +1,16 @@
-"""值得关注的热点：基于知乎热榜 Top 20 + DeepSeek 精选 Top 5。
+"""值得关注的热点：基于知乎热榜 Top 20 + Moonshot v1 8k 精选 Top 5。
 
 数据流：
-    1. 优先读 webapp/cache/hot_picks.json，命中且未过期（12 小时）直接返回。
-    2. 缓存未命中时，调用 hot_list.fetch_hot_list(size=20) 拿候选（这一步本身
-       已经走 webapp/cache/hot_list.json 的 12h 缓存）。
-    3. 若配置了 DeepSeek key，按下面的 PICK_USER_PROMPT_TEMPLATE 让模型从
-       Top 20 里挑出 5 条，并解析模型返回的 JSON。
-    4. 没有 key 或模型解析失败时，使用本地 mock 兜底（保持与上线后一致的字段
-       结构，便于前端 / 联调）。
-    5. 把结果写回 hot_picks.json（含来源、模型标识、prompt 备份），下次直接读。
+    1. 优先读 webapp/cache/hot_picks.json，命中且未过期（15 分钟）直接返回。
+    2. 缓存未命中时，调用 hot_list.fetch_hot_list(size=20, cache_only=True)
+       拿候选——只读知乎热榜的本地缓存（webapp/cache/hot_list.json，1h TTL），
+       不会因为「今日热点」按钮就触发知乎接口刷新。
+    3. 优先用 moonshot-v1-8k 让模型从 Top 20 里挑出 5 条；Kimi key 缺失或失败
+       时回落 DeepSeek，再失败回落本地 mock，保证接口永远有结果可返。
+    4. 把结果写回 hot_picks.json（含来源、模型标识、prompt 备份），15 分钟内
+       下次进入函数直接读缓存返回。
 
-之所以保留 prompt_messages，是方便上线 DeepSeek 接入前同事们直接看到当前
-正在使用的范式，不必猜测。
+之所以保留 prompt_messages，是方便联调时直接看到当前实际下发给模型的范式。
 """
 from __future__ import annotations
 
@@ -22,16 +21,17 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import deepseek_client, hot_list, roles
+from . import deepseek_client, hot_list, kimi_client, roles
 from .config_loader import load_config
 
 
 logger = logging.getLogger(__name__)
 
 
-PICKS_TTL_SECONDS = 12 * 60 * 60  # 12 小时
+PICKS_TTL_SECONDS = 15 * 60  # 15 分钟
 PICKS_TARGET = 5
 CANDIDATE_TOP = 20
+PICK_MODEL = "moonshot-v1-8k"
 
 WEBAPP_DIR = Path(__file__).resolve().parent.parent
 CACHE_DIR = WEBAPP_DIR / "cache"
@@ -186,10 +186,62 @@ def _parse_picks(raw_text: str, candidates: List[Dict[str, Any]]) -> List[Dict[s
     return out
 
 
-# ---------------- DeepSeek / Mock ---------------- #
+# ---------------- 模型调用（Kimi / DeepSeek / Mock） ---------------- #
 
-def _ask_deepseek(messages: List[Dict[str, str]]) -> Optional[str]:
-    """调用 DeepSeek。未配置 key 或调用异常时返回 None，由调用方走 mock。"""
+# 落日志时统一加在文件名前面的场景标识，方便在 webapp/logs/ 下用
+# `ls hotpicks-*.log` / `grep -l '"scene": "hot_picks"'` 快速捞出今日热点
+# 相关的所有调用记录，与「直答 / Kimi 对话」分开排查。
+_LOG_SCENE = "hot_picks"
+
+
+def _log_extra(purpose: str) -> Dict[str, Any]:
+    """为本场景的 LLM 调用统一打上 scene/purpose 标签，落进日志的 REQUEST.extra。
+
+    `purpose` 区分调用语义（`pick` = 选 5 条，`observation` = 生成观察文案），
+    后续如果再加入「话题预热」「评论摘要」等子任务，沿用此处约定即可。
+    """
+    return {"scene": _LOG_SCENE, "purpose": purpose}
+
+
+def _log_prefix(purpose: str) -> str:
+    return f"{_LOG_SCENE}-{purpose}"
+
+
+def _ask_kimi(messages: List[Dict[str, str]], purpose: str) -> Optional[str]:
+    """调用 Moonshot v1 8k。未配置 key 或调用异常时返回 None。
+
+    Moonshot 的 free 账号开箱可用的就是 `moonshot-v1-*` 系列，正好对应今日
+    热点这种轻量结构化筛选场景；显式锁定 PICK_MODEL，避免后续有人改了
+    `kimi_model` 配置后把贵的思考模型默认接进这里。`purpose` 仅用于落日志
+    时区分子任务（pick / observation 等）。
+    """
+    cfg = load_config()
+    api_key = (cfg.get("kimi_api_key") or "").strip()
+    if not api_key:
+        return None
+    client = kimi_client.KimiClient(
+        api_key=api_key,
+        base_url=cfg.get("kimi_base_url") or kimi_client.DEFAULT_BASE_URL,
+        model=PICK_MODEL,
+    )
+    try:
+        return client.chat_once(
+            messages,
+            model=PICK_MODEL,
+            temperature=0.3,
+            extra=_log_extra(purpose),
+            log_name_prefix=_log_prefix(purpose),
+        )
+    except Exception as exc:  # noqa: BLE001 - 网络/权限/解析全部兜底
+        logger.warning("kimi pick call failed (purpose=%s): %s", purpose, exc)
+        return None
+
+
+def _ask_deepseek(messages: List[Dict[str, str]], purpose: str) -> Optional[str]:
+    """调用 DeepSeek。未配置 key 或调用异常时返回 None，由调用方走 mock。
+
+    `purpose` 同 `_ask_kimi`，用于落日志时打 scene 标签。
+    """
     cfg = load_config()
     api_key = (cfg.get("deepseek_api_key") or "").strip()
     if not api_key:
@@ -200,9 +252,14 @@ def _ask_deepseek(messages: List[Dict[str, str]]) -> Optional[str]:
         model=cfg.get("deepseek_model") or "deepseek-chat",
     )
     try:
-        return client.chat_once(messages, temperature=0.3)
+        return client.chat_once(
+            messages,
+            temperature=0.3,
+            extra=_log_extra(purpose),
+            log_name_prefix=_log_prefix(purpose),
+        )
     except Exception as exc:  # noqa: BLE001 - 网络/解析层全部兜底走 mock
-        logger.warning("deepseek pick call failed: %s", exc)
+        logger.warning("deepseek pick call failed (purpose=%s): %s", purpose, exc)
         return None
 
 
@@ -268,11 +325,16 @@ def _mock_observation(picks: List[Dict[str, Any]]) -> str:
 
 
 def _generate_observation(picks: List[Dict[str, Any]]) -> str:
-    """优先用 DeepSeek 生成；失败 / 未配置时退回到基于 picks 的确定性模板。"""
+    """优先用 moonshot-v1-8k，其次 DeepSeek，再回退到基于 picks 的确定性模板。
+
+    和 picks 选拔统一走 Kimi，避免两段文案分别由不同模型生成时语气割裂。
+    """
     if not picks:
         return _mock_observation(picks)
     messages = build_observation_messages(picks)
-    raw = _ask_deepseek(messages)
+    raw = _ask_kimi(messages, purpose="observation") or _ask_deepseek(
+        messages, purpose="observation"
+    )
     if raw and raw.strip():
         return raw.strip()
     return _mock_observation(picks)
@@ -286,9 +348,9 @@ def get_hot_picks(force_refresh: bool = False) -> Dict[str, Any]:
     返回字段：
       - picks: 5 条命中候选的完整结构（包含 reason）
       - candidates: 本次模型可见的 Top 20 候选
-      - observation: 基于真实 picks 生成的一段「今日观察」（DeepSeek 或本地模板）
+      - observation: 基于真实 picks 生成的一段「今日观察」（Kimi / DeepSeek / 模板）
       - hot_source: 热榜的来源（zhihu_open_api / disk-cache / mock 等）
-      - model_used: deepseek 或 mock
+      - model_used: moonshot-v1-8k / deepseek / mock
       - cache: hit / refresh / miss
       - fetched_at: unix 秒
       - prompt_messages: 本次实际下发给模型的 system + user 消息（便于联调）
@@ -301,17 +363,19 @@ def get_hot_picks(force_refresh: bool = False) -> Dict[str, Any]:
             picks = cached.get("picks") or []
             if picks and (now - ts) < PICKS_TTL_SECONDS:
                 if not cached.get("observation"):
-                    # 老缓存里没有 observation，懒补一次；不影响 12h TTL
+                    # 老缓存里没有 observation，懒补一次；不影响 PICKS_TTL_SECONDS
                     cached["observation"] = _generate_observation(picks)
                     _write_cache(cached)
                 logger.info(
-                    "hot_picks cache hit, age=%.1fh, model=%s",
-                    max(0.0, (now - ts) / 3600.0),
+                    "hot_picks cache hit, age=%.1fmin, model=%s",
+                    max(0.0, (now - ts) / 60.0),
                     cached.get("model_used"),
                 )
                 return {**cached, "cache": "hit"}
 
-        hot = hot_list.fetch_hot_list(size=CANDIDATE_TOP)
+        # 热榜只读缓存（webapp/cache/hot_list.json，1h TTL），不为了挑 5 条
+        # 而触发对知乎开放接口的额外刷新；hot_list 自带「无缓存时 mock 兜底」。
+        hot = hot_list.fetch_hot_list(size=CANDIDATE_TOP, cache_only=True)
         candidates = (hot.get("items") or [])[:CANDIDATE_TOP]
         if not candidates:
             return {
@@ -326,16 +390,29 @@ def get_hot_picks(force_refresh: bool = False) -> Dict[str, Any]:
             }
 
         messages = build_pick_messages(candidates)
-        raw = _ask_deepseek(messages)
 
         picks: List[Dict[str, Any]] = []
         model_used = "mock"
-        if raw:
-            picks = _parse_picks(raw, candidates)
+
+        # 优先 Kimi（moonshot-v1-8k），失败再退 DeepSeek，再退本地 mock，
+        # 保证「无外部 API」的部署也能跑通。每次实际请求都会被 chat_once 内部
+        # 的 LLMCallLogger 记到 webapp/logs/hot_picks-pick-<model>-<ts>.log。
+        raw_kimi = _ask_kimi(messages, purpose="pick")
+        if raw_kimi:
+            picks = _parse_picks(raw_kimi, candidates)
             if picks:
-                model_used = "deepseek"
+                model_used = PICK_MODEL
             else:
-                logger.warning("deepseek returned but parse yielded 0 picks, fallback mock")
+                logger.warning("kimi returned but parse yielded 0 picks, try deepseek")
+
+        if not picks:
+            raw_ds = _ask_deepseek(messages, purpose="pick")
+            if raw_ds:
+                picks = _parse_picks(raw_ds, candidates)
+                if picks:
+                    model_used = "deepseek"
+                else:
+                    logger.warning("deepseek returned but parse yielded 0 picks, fallback mock")
 
         if not picks:
             picks = _mock_pick(candidates)

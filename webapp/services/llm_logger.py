@@ -80,6 +80,7 @@ class LLMCallLogger:
         request_payload: Optional[Any] = None,
         stream: bool = False,
         extra: Optional[Dict[str, Any]] = None,
+        name_prefix: Optional[str] = None,
     ) -> None:
         self.provider = provider or "unknown"
         self.model = model or "unknown"
@@ -92,7 +93,11 @@ class LLMCallLogger:
         safe_model = _safe_filename_part(self.model)
         # 加 4 位随机/序列后缀，避免同一毫秒并发请求重名（thread id 截断即可）。
         thread_suffix = str(threading.get_ident())[-4:]
-        filename = f"{safe_model}-{ts_text}-{ms:03d}-{thread_suffix}.log"
+        # `name_prefix` 允许调用方在文件名最前面加上场景标签，比如
+        # "hotpicks-pick"，让一类批处理日志能用通配符快速捞出来，但模型 id
+        # 仍然保留在文件名中、grep 单一模型时不影响命中。
+        prefix_part = f"{_safe_filename_part(name_prefix)}-" if name_prefix else ""
+        filename = f"{prefix_part}{safe_model}-{ts_text}-{ms:03d}-{thread_suffix}.log"
 
         self.path: Optional[Path] = None
         self._fp = None

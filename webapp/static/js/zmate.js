@@ -112,6 +112,10 @@
       this.streaming = false;
       this.abortCtl = null;
       this.document = this.opts.document || null;
+      // 详情页脚本可以在 new Zmate 时立刻传 inDocumentPage:true，避免文档异步
+      // 加载期间「今日热点」按钮短暂闪一下。即便没有这个标记，setDocument
+      // 触发的 applyDocumentContext() 也会兜底隐藏。
+      this.inDocumentPage = !!this.opts.inDocumentPage;
       this.models = [];
       this.selectedModel = null;
       this.mount();
@@ -135,11 +139,14 @@
       this.$suggestions = this.panel.querySelector("[data-zmate-suggestions]");
       this.$modelSelect = this.panel.querySelector("[data-zmate-model]");
       this.$modelHint = this.panel.querySelector("[data-zmate-model-hint]");
+      // 顶栏的「今日热点」入口按钮。文档详情页打开 Zmate 时会被 applyDocumentContext()
+      // 隐藏——围绕单篇内容的对话场景里不再弹出与之无关的热点选拔。
+      this.$newsBtn = this.panel.querySelector("[data-zmate-news]");
 
       this.launcher.querySelector("[data-zmate-toggle]").addEventListener("click", () => this.toggle());
       this.panel.querySelector("[data-zmate-close]").addEventListener("click", () => this.close());
       this.panel.querySelector("[data-zmate-clear]").addEventListener("click", () => this.clearChat());
-      this.panel.querySelector("[data-zmate-news]").addEventListener("click", () => this.askNews());
+      this.$newsBtn.addEventListener("click", () => this.askNews());
 
       this.$input.addEventListener("input", () => {
         this.$send.disabled = !this.$input.value.trim() || this.streaming;
@@ -253,6 +260,13 @@
     }
 
     applyDocumentContext() {
+      // 「在文档详情页打开 Zmate」满足任一即可：
+      //   1) 调用方在 new 时显式声明 inDocumentPage（detail.js 在拿到文档前
+      //      就能锁定，避免热点按钮短暂闪现）；
+      //   2) 已经 setDocument 注入了具体文档。
+      const inDocScene = this.inDocumentPage || !!this.document;
+      if (this.$newsBtn) this.$newsBtn.hidden = inDocScene;
+
       if (this.document) {
         this.$context.classList.remove("hidden");
         this.$contextTitle.textContent = this.document.title || "当前文档";
@@ -275,7 +289,7 @@
     greet() {
       if (this.document) {
         this.appendAssistant(
-          `已经看到你打开的《${this.document.title}》了～\n\n你可以让我：\n• 用 5 分钟口头摘要这篇内容\n• 找出可被验证的关键事实\n• 给出 3 点延伸阅读建议\n\n或者直接把你心里的疑问发给我。`
+          `已经看到你打开的《${this.document.title}》了～\n\n你可以让我：\n• 用 1 分钟口头摘要这篇内容\n• 找出可被验证的关键事实\n• 给出 3 点延伸阅读建议\n\n或者直接把你心里的疑问发给我。`
         );
       } else {
         this.appendAssistant(
@@ -331,14 +345,23 @@
 
     appendNewsCard(picks, meta) {
       if (!picks || !picks.length) return;
-      const modelTag =
-        meta && meta.model_used === "deepseek"
-          ? '<span class="zmate-news__source" title="由 DeepSeek 精选">DeepSeek 精选</span>'
-          : '<span class="zmate-news__source is-mock" title="DeepSeek 未接入，先用本地兜底数据">演示数据</span>';
-      const cacheTag =
-        meta && meta.cache === "hit"
-          ? '<span class="zmate-news__cache" title="命中本地缓存（12 小时）">缓存</span>'
-          : "";
+      // 后端 hot_picks 返回的 model_used 可能是：moonshot-v1-8k / deepseek /
+      // mock（无 key 或调用失败兜底）。这里按模型显示对应标签；mock 路径
+      // 不渲染任何模型标签，避免给用户「演示数据」之类的误导——只有那条
+      // 路径才真的不是大模型筛出来的。
+      const modelUsed = (meta && meta.model_used) || "";
+      let modelTag = "";
+      if (modelUsed === "moonshot-v1-8k") {
+        modelTag = '<span class="zmate-news__source" title="由 Moonshot v1 8k 提供计算">Zmate 精选</span>';
+      } else if (modelUsed === "deepseek") {
+        modelTag = '<span class="zmate-news__source" title="由 DeepSeek 提供计算">Zmate 精选</span>';
+      } else if (modelUsed && modelUsed !== "mock") {
+        modelTag = `<span class="zmate-news__source" title="由 ${escapeHtml(modelUsed)} 提供计算">Zmate 精选</span>`;
+      }
+      // const cacheTag =
+      //   meta && meta.cache === "hit"
+      //     ? '<span class="zmate-news__cache" title="命中本地缓存（15 分钟）">缓存</span>'
+      //     : "";
 
       const wrap = document.createElement("div");
       wrap.className = "zmate-msg is-zmate";
@@ -347,7 +370,7 @@
         <div class="zmate-news">
           <div class="zmate-news__title">
             <span>🔥 值得关注的热点 · TOP${picks.length}</span>
-            <span class="zmate-news__meta">${modelTag}${cacheTag}</span>
+            <span class="zmate-news__meta">${modelTag}</span>
           </div>
           <div class="zmate-news__hint">来源：知乎热榜 Top 20 · 由 Zmate 帮你挑出最值得花时间的几条</div>
         </div>

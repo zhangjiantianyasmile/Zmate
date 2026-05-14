@@ -47,8 +47,15 @@ class DeepSeekClient:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.3,
+        extra: Optional[Dict[str, object]] = None,
+        log_name_prefix: Optional[str] = None,
     ) -> str:
-        """非流式调用，返回完整 content；适合让模型一次性产出结构化结果。"""
+        """非流式调用，返回完整 content；适合让模型一次性产出结构化结果。
+
+        `extra` / `log_name_prefix` 透传给 `LLMCallLogger`：用于让调用方
+        （如「今日热点选拔」批处理）在 webapp/logs/ 下产出带场景标记的日志，
+        方便回溯排查；未传时和老调用方完全一致。
+        """
         url = f"{self.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -67,6 +74,8 @@ class DeepSeekClient:
             request_headers=headers,
             request_payload=payload,
             stream=False,
+            extra=extra,
+            name_prefix=log_name_prefix,
         )
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
@@ -212,7 +221,7 @@ def mock_chat_stream(
             "针对你的提问，我有几点可以聊：\n\n"
             "1) 文章的核心论点比较强调实践经验，不是单纯的理论复述；\n"
             "2) 如果想验证里面的结论，可以先关注作者列举的几条数据来源；\n"
-            "3) 你也可以问我「帮我提炼一份 5 分钟的口头摘要」或「这篇里最有争议的观点是什么」。\n\n"
+            "3) 你也可以问我「帮我提炼一份 1 分钟的口头摘要」或「这篇里最有争议的观点是什么」。\n\n"
             f"你的提问：「{user_text}」。我的快速回应是——这个问题里其实藏了三层：现象、机制、应对。"
             "我们可以挑一个先聊。"
         )

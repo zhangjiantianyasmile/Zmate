@@ -5,8 +5,10 @@
   鉴权：Authorization: Bearer <app_secret>，X-Request-Timestamp: <unix_seconds>
 - 缓存策略：
   - 进程启动后第一次请求会优先读取磁盘缓存（webapp/cache/hot_list.json）
-  - 缓存有效期 12 小时，未过期直接返回；过期或不存在则请求远端接口并回写缓存
+  - 缓存有效期 1 小时，未过期直接返回；过期或不存在则请求远端接口并回写缓存
   - 远端调用失败时优先回退到磁盘已有缓存（即使过期），再不可用才回退 mock
+  - `cache_only=True` 仅返回缓存（有则返回、即使过期；无则 mock），不发任何远端请求；
+    上游链路（如 hot_picks）需要 Top 20 候选但不愿因热点选拔触发知乎接口刷新时使用。
 """
 from __future__ import annotations
 
@@ -27,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 ZHIHU_HOT_LIST_URL = "https://developer.zhihu.com/api/v1/content/hot_list"
-CACHE_TTL_SECONDS = 12 * 60 * 60  # 12 小时
+CACHE_TTL_SECONDS = 1 * 60 * 60  # 1 小时
 REQUEST_TIMEOUT = 6  # seconds
 
 WEBAPP_DIR = Path(__file__).resolve().parent.parent
@@ -204,12 +206,15 @@ def fetch_hot_list(
     size: int = 10,
     force_refresh: bool = False,
     page: int = 0,
+    cache_only: bool = False,
 ) -> Dict[str, Any]:
     """返回 {items, source, fetched_at, page, page_size, total, total_pages, cache}。
 
     流程：内存缓存 -> 磁盘缓存（首次启动） -> 知乎开放接口 -> 旧缓存 -> mock
     - 缓存命中条件：fetched_at 距今不超过 CACHE_TTL_SECONDS
     - 切片由 page/size 控制，超出末尾会环回到头部，保证翻页可以一直循环
+    - `cache_only=True` 时跳过远端调用：有缓存就返回（即使过期，标记为 stale），
+      没缓存就 mock 兜底；和 `force_refresh` 互斥（cache_only 优先生效）。
     """
     with _CACHE_LOCK:
         _ensure_disk_loaded()
@@ -226,6 +231,25 @@ def fetch_hot_list(
                 "source": _MEMORY_CACHE.get("source") or "cache",
                 "fetched_at": cached_ts,
                 "cache": "hit",
+            }
+
+        if cache_only:
+            # 上游显式要求「不联网」：有什么用什么，不发请求也不刷缓存。
+            if cached_items:
+                page_info = _paginate(cached_items, page, size)
+                return {
+                    **page_info,
+                    "source": _MEMORY_CACHE.get("source") or "cache",
+                    "fetched_at": cached_ts,
+                    "cache": "hit" if cache_fresh else "stale",
+                }
+            mock_items = mock_data.generate_hot_list(size=max(size * 2, 12))
+            page_info = _paginate(mock_items, page, size)
+            return {
+                **page_info,
+                "source": "mock",
+                "fetched_at": now,
+                "cache": "miss",
             }
 
         cfg = load_config()

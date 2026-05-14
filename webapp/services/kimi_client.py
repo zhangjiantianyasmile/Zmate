@@ -187,8 +187,15 @@ class KimiClient:
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.6,
+        extra: Optional[Dict[str, Any]] = None,
+        log_name_prefix: Optional[str] = None,
     ) -> str:
-        """非流式调用，返回完整 content。"""
+        """非流式调用，返回完整 content。
+
+        `extra` / `log_name_prefix` 用于把调用方上下文（如『今日热点选拔』）
+        透传给 `LLMCallLogger`：前者落到 REQUEST.extra 字段，后者会拼到日志
+        文件名的最前面，方便后续按场景快速分拣。
+        """
         url = f"{self.base_url}/chat/completions"
         resolved_model = self._resolve_model(model)
         headers = self._headers()
@@ -205,6 +212,8 @@ class KimiClient:
             request_headers=headers,
             request_payload=payload,
             stream=False,
+            extra=extra,
+            name_prefix=log_name_prefix,
         )
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=self.timeout)

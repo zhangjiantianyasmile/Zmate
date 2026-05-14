@@ -176,18 +176,18 @@ def _model_catalog() -> List[Dict[str, Any]]:
         #     "ready": kimi_ready,
         #     "default": False,
         # },
-        {
-            "provider": PROVIDER_DEEPSEEK,
-            "model": "deepseek-chat",
-            "label": "DeepSeek Chat",
-            "short": "DeepSeek",
-            "description": (
-                "OpenAI 兼容协议的 deepseek-chat 模型；当前未配置 API Key，"
-                "选择后会回退到本地 mock 流式回复。"
-            ),
-            "ready": deepseek_ready,
-            "default": False,
-        },
+        # {
+        #     "provider": PROVIDER_DEEPSEEK,
+        #     "model": "deepseek-chat",
+        #     "label": "DeepSeek Chat",
+        #     "short": "DeepSeek",
+        #     "description": (
+        #         "OpenAI 兼容协议的 deepseek-chat 模型；当前未配置 API Key，"
+        #         "选择后会回退到本地 mock 流式回复。"
+        #     ),
+        #     "ready": deepseek_ready,
+        #     "default": False,
+        # },
     ]
 
 
@@ -461,9 +461,10 @@ def api_search() -> Response:
 def api_zmate_news() -> Response:
     """返回 Zmate 精选的『值得关注的热点』Top 5。
 
-    数据流：知乎热榜 Top 20（webapp/cache/hot_list.json） -> DeepSeek 选 5
-    -> 写入 webapp/cache/hot_picks.json（12h 缓存）。无 DeepSeek key 时用
-    本地 mock 兜底，prompt 范式保持一致。
+    数据流：知乎热榜 Top 20（webapp/cache/hot_list.json，仅读缓存，TTL 1h）
+    -> Moonshot v1 8k 选 5 -> 写入 webapp/cache/hot_picks.json（TTL 15min）。
+    Kimi key 缺失或调用失败时回退 DeepSeek，再失败回退本地 mock；prompt 范式
+    保持一致，前端无需关心实际命中的模型。
     """
     refresh = request.args.get("refresh", default="0") == "1"
     payload = hot_picks.get_hot_picks(force_refresh=refresh)
